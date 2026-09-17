@@ -160,6 +160,25 @@ test('download-batch e update-process repassam o payload intacto até o agente',
   });
 });
 
+test('/api/actions/reconnect-super repassa o payload (código do Authenticator) até o agente', async () => {
+  await withRelay(async ({ baseUrl, wsBase }) => {
+    const agent = await connectAgent(wsBase, AGENT_SECRET);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    agent.on('message', (raw) => {
+      const message = JSON.parse(raw.toString('utf8'));
+      if (message.type === 'action' && message.name === 'reconnect-super') {
+        agent.send(JSON.stringify({ type: 'action-result', requestId: message.requestId, ok: true, result: { authenticated: true, payloadSeen: message.payload } }));
+      }
+    });
+
+    const response = await request(baseUrl, '/api/actions/reconnect-super', { method: 'POST', token: AGENT_SECRET, body: { totpCode: '123456' } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.data.result, { authenticated: true, payloadSeen: { totpCode: '123456' } });
+    agent.close();
+  });
+});
+
 test('token inválido é recusado em rotas protegidas', async () => {
   await withRelay(async ({ baseUrl }) => {
     const response = await request(baseUrl, '/api/state', { token: 'lixo' });

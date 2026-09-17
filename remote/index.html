@@ -33,6 +33,14 @@
       <p id="actionStatus" class="status" role="status"></p>
     </div>
 
+    <div class="card" id="superReconnectCard" hidden>
+      <p class="connection-state offline">Sessão do SUPER Sapiens desconectada no computador.</p>
+      <p>Digite o código atual de 6 dígitos do Authenticator (só é pedido se o APISS solicitar) e reconecte usando o login já salvo no computador.</p>
+      <input id="superTotpCode" inputmode="numeric" maxlength="6" placeholder="Código do Authenticator (opcional)" autocomplete="off"/>
+      <button id="btnReconnectSuper" class="primary">Reconectar ao SUPER</button>
+      <p id="superReconnectStatus" class="status" role="status"></p>
+    </div>
+
     <div class="card">
       <h2>Processos</h2>
       <input id="processSearch" type="search" placeholder="Buscar por número ou assunto…"/>

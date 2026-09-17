@@ -140,6 +140,8 @@
       renderLog(result.log);
       latestProcesses = Array.isArray(result.processes) ? result.processes : [];
       if (!editingOpen) renderProcessList();
+      var reconnectCard = el('superReconnectCard');
+      if (reconnectCard) reconnectCard.hidden = !result.connected || result.superAuthenticated !== false;
     }).catch(function () { el('connectionState').textContent = 'Não foi possível falar com o servidor.'; });
   }
 
@@ -177,6 +179,26 @@
 
   el('btnSync').addEventListener('click', function () {
     runAction('/api/actions/sync', el('btnSync'), 'Sincronizando com o SUPER…', 'Sincronização concluída.');
+  });
+
+  el('btnReconnectSuper').addEventListener('click', function () {
+    var button = el('btnReconnectSuper'), status = el('superReconnectStatus'), code = el('superTotpCode').value;
+    button.disabled = true;
+    status.textContent = 'Reconectando…';
+    api('/api/actions/reconnect-super', { method: 'POST', body: { totpCode: code } }).then(function (response) {
+      if (response.status === 401) { clearToken(); showPairView(); return; }
+      if (response.data && response.data.ok && response.data.result && response.data.result.authenticated) {
+        status.textContent = 'Reconectado ao SUPER.';
+        el('superTotpCode').value = '';
+      } else {
+        status.textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível reconectar.';
+      }
+      refreshState();
+    }).catch(function () {
+      status.textContent = 'Falha de conexão com o APISS.';
+    }).finally(function () {
+      button.disabled = false;
+    });
   });
 
   el('processSearch').addEventListener('input', function (event) {

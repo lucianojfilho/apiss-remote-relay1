@@ -144,6 +144,7 @@ function createRelay(options = {}) {
       '/api/actions/sync': 'sync',
       '/api/actions/download-batch': 'download-batch',
       '/api/actions/update-process': 'update-process',
+      '/api/actions/reconnect-super': 'reconnect-super',
     };
     const actionName = req.method === 'POST' ? actionRoutes[pathname] : undefined;
     if (actionName) {
