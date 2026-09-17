@@ -1,0 +1,17 @@
+{
+  "name": "apiss-remote-relay",
+  "version": "1.0.0",
+  "description": "Painel web (celular) para controle remoto do APISS, ligando o navegador do usuário ao agente do APISS conectado por WebSocket de saída.",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

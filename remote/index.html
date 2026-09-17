@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>APISS · Controle remoto</title>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<main class="app">
+  <header><h1>APISS</h1><p class="subtitle">Controle remoto</p></header>
+
+  <section id="pairView" class="card">
+    <h2>Parear este celular</h2>
+    <p>Abra o APISS no computador, vá em <b>Outras ferramentas → Controle remoto</b> e digite aqui o código exibido.</p>
+    <input id="pairCode" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code"/>
+    <button id="btnPair" class="primary">Parear</button>
+    <p id="pairStatus" class="status" role="status"></p>
+  </section>
+
+  <section id="dashboardView" hidden>
+    <div class="card">
+      <p class="connection-state" id="connectionState">Verificando conexão com o APISS…</p>
+      <div class="counters">
+        <div class="counter"><span id="cntDia">–</span><label>Processos do dia</label></div>
+        <div class="counter"><span id="cntProximos">–</span><label>Próximos do prazo</label></div>
+        <div class="counter"><span id="cntVencidos">–</span><label>Vencidos</label></div>
+      </div>
+      <p class="last-sync">Última sincronização: <span id="lastSync">—</span></p>
+      <div class="actions">
+        <button id="btnSync" class="primary">Sincronizar com o SUPER</button>
+      </div>
+      <p id="actionStatus" class="status" role="status"></p>
+    </div>
+
+    <div class="card">
+      <h2>Processos</h2>
+      <input id="processSearch" type="search" placeholder="Buscar por número ou assunto…"/>
+      <label class="select-all-row"><input type="checkbox" id="selectAllVisible"/> Marcar todos os filtrados</label>
+      <div class="actions">
+        <button id="btnDownloadBatch" class="primary" disabled>Baixar selecionados</button>
+      </div>
+      <p id="batchStatus" class="status" role="status"></p>
+      <div id="processList"></div>
+    </div>
+
+    <details class="log">
+      <summary>Últimas ações</summary>
+      <ul id="logList"></ul>
+    </details>
+
+    <button id="btnForget" class="linklike">Esquecer este celular</button>
+  </section>
+</main>
+<template id="processCardTemplate">
+  <article class="process-card">
+    <div class="process-head">
+      <input type="checkbox" class="process-select"/>
+      <button type="button" class="process-open"><span class="process-numero"></span><span class="process-assunto"></span></button>
+      <span class="process-deadline"></span>
+    </div>
+    <div class="process-edit" hidden>
+      <label>Status <select class="process-status">
+        <option>Ativo</option>
+        <option>Aguardando cálculo</option>
+        <option>Aguardando subsídios</option>
+        <option>Concluído</option>
+        <option>Suspenso</option>
+      </select></label>
+      <label>Observação <textarea class="process-observacao" rows="3"></textarea></label>
+      <button type="button" class="secondary process-save">Salvar</button>
+      <p class="process-edit-status status"></p>
+    </div>
+  </article>
+</template>
+<script src="app.js"></script>
+</body>
+</html>
