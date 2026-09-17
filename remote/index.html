@@ -11,10 +11,10 @@
   <header><h1>APISS</h1><p class="subtitle">Controle remoto</p></header>
 
   <section id="pairView" class="card">
-    <h2>Parear este celular</h2>
-    <p>Abra o APISS no computador, vá em <b>Outras ferramentas → Controle remoto</b> e digite aqui o código exibido.</p>
-    <input id="pairCode" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code"/>
-    <button id="btnPair" class="primary">Parear</button>
+    <h2>Entrar</h2>
+    <p>Abra o APISS no computador, vá em <b>Outras ferramentas → Controle remoto</b> e copie o campo <b>"Segredo do agente"</b>. Cole aqui — é a mesma senha sempre, não expira.</p>
+    <input id="pairCode" type="password" placeholder="Segredo do agente" autocomplete="off"/>
+    <button id="btnPair" class="primary">Entrar</button>
     <p id="pairStatus" class="status" role="status"></p>
   </section>
 

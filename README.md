@@ -38,11 +38,20 @@ configurar tudo automaticamente.
 ## Configurando o APISS
 
 No APISS, na mesma aba **Controle remoto**, cole a URL do Render no campo de
-endereço e clique em Salvar. Depois clique em "Gerar código de pareamento" e
-digite esse código no celular, na mesma URL.
+endereço e clique em Salvar.
+
+## Entrando pelo celular
+
+Abra a URL do Render no celular e cole o mesmo valor do **"Segredo do
+agente"** (o mesmo que você usou no `AGENT_SECRET` do Render) no campo de
+senha. Não existe pareamento por código nem expiração — é a mesma senha
+sempre, guardada no navegador do celular, então normalmente você só faz isso
+uma vez por aparelho/navegador.
 
 ## Aviso sobre o plano gratuito
 
 O plano gratuito do Render "dorme" o serviço depois de ~15 minutos sem uso e
 demora alguns segundos para acordar na próxima visita — normal, sem
-configuração extra. O APISS reconecta sozinho quando isso acontece.
+configuração extra. O APISS reconecta sozinho quando isso acontece, e como a
+senha do celular nunca expira, você não precisa entrar de novo por causa
+disso.

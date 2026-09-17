@@ -56,44 +56,67 @@ test('recusa a conexão do agente com segredo errado', async () => {
   });
 });
 
-test('/api/state sem agente conectado responde connected:false, e /api/actions/sync responde 503', async () => {
-  await withRelay(async ({ baseUrl, state }) => {
-    state.setPairingCode('123456', Date.now() + 60000);
-    const paired = await request(baseUrl, '/api/pair', { method: 'POST', body: { code: '123456' } });
-    const token = paired.data.result.token;
+test('/api/login recusa senha errada e aceita a senha certa (o próprio AGENT_SECRET)', async () => {
+  await withRelay(async ({ baseUrl }) => {
+    const wrong = await request(baseUrl, '/api/login', { method: 'POST', body: { password: 'chuta' } });
+    assert.equal(wrong.status, 401);
 
-    const stateResponse = await request(baseUrl, '/api/state', { token });
+    const right = await request(baseUrl, '/api/login', { method: 'POST', body: { password: AGENT_SECRET } });
+    assert.equal(right.status, 200);
+    assert.equal(right.data.ok, true);
+  });
+});
+
+test('/api/state sem agente conectado responde connected:false, e /api/actions/sync responde 503', async () => {
+  await withRelay(async ({ baseUrl }) => {
+    const stateResponse = await request(baseUrl, '/api/state', { token: AGENT_SECRET });
     assert.equal(stateResponse.data.result.connected, false);
 
-    const actionResponse = await request(baseUrl, '/api/actions/sync', { method: 'POST', token });
+    const actionResponse = await request(baseUrl, '/api/actions/sync', { method: 'POST', token: AGENT_SECRET });
     assert.equal(actionResponse.status, 503);
   });
 });
 
-test('o agente conecta, define o código de pareamento, e o celular consegue parear e ver o estado', async () => {
+test('o agente conecta e empurra o estado, e o celular consegue ver com a mesma senha do agente', async () => {
   await withRelay(async ({ baseUrl, wsBase }) => {
     const agent = await connectAgent(wsBase, AGENT_SECRET);
-    agent.send(JSON.stringify({ type: 'set-pairing-code', code: '654321', expiresAt: Date.now() + 60000 }));
     agent.send(JSON.stringify({ type: 'push-state', snapshot: { dayCount: 3, nearCount: 7, overdueCount: 0, lastSyncAt: '2026-09-14T11:00:00.000Z' } }));
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const paired = await request(baseUrl, '/api/pair', { method: 'POST', body: { code: '654321' } });
-    assert.equal(paired.status, 200);
-
-    const stateResponse = await request(baseUrl, '/api/state', { token: paired.data.result.token });
+    const stateResponse = await request(baseUrl, '/api/state', { token: AGENT_SECRET });
+    assert.equal(stateResponse.status, 200);
     assert.equal(stateResponse.data.result.connected, true);
     assert.equal(stateResponse.data.result.dayCount, 3);
     agent.close();
   });
 });
 
+test('a mesma senha continua funcionando mesmo que o relay "reinicie" (nada fica em memória para expirar)', async () => {
+  // Simula o efeito de um restart do serviço no plano gratuito do Render: cria uma SEGUNDA
+  // instância do relay (memória zerada) com o mesmo AGENT_SECRET (que vem de uma variável de
+  // ambiente, não da memória do processo) e confirma que a senha do celular continua válida
+  // sem precisar de um novo pareamento.
+  const first = createRelay({ agentSecret: AGENT_SECRET });
+  await new Promise((resolve) => first.server.listen(0, resolve));
+  const port = first.server.address().port;
+  for (const client of first.wss.clients) client.terminate();
+  await new Promise((resolve) => first.server.close(resolve));
+
+  const second = createRelay({ agentSecret: AGENT_SECRET });
+  await new Promise((resolve) => second.server.listen(port, resolve));
+  try {
+    const response = await request(`http://127.0.0.1:${port}`, '/api/login', { method: 'POST', body: { password: AGENT_SECRET } });
+    assert.equal(response.status, 200);
+  } finally {
+    for (const client of second.wss.clients) client.terminate();
+    await new Promise((resolve) => second.server.close(resolve));
+  }
+});
+
 test('uma ação disparada pelo celular chega no agente e a resposta do agente volta pro celular', async () => {
   await withRelay(async ({ baseUrl, wsBase }) => {
     const agent = await connectAgent(wsBase, AGENT_SECRET);
-    agent.send(JSON.stringify({ type: 'set-pairing-code', code: '111222', expiresAt: Date.now() + 60000 }));
     await new Promise((resolve) => setTimeout(resolve, 50));
-    const paired = await request(baseUrl, '/api/pair', { method: 'POST', body: { code: '111222' } });
-    const token = paired.data.result.token;
 
     agent.on('message', (raw) => {
       const message = JSON.parse(raw.toString('utf8'));
@@ -102,7 +125,7 @@ test('uma ação disparada pelo celular chega no agente e a resposta do agente v
       }
     });
 
-    const response = await request(baseUrl, '/api/actions/sync', { method: 'POST', token });
+    const response = await request(baseUrl, '/api/actions/sync', { method: 'POST', token: AGENT_SECRET });
     assert.equal(response.status, 200);
     assert.deepEqual(response.data.result, { synced: true });
     agent.close();
@@ -112,10 +135,7 @@ test('uma ação disparada pelo celular chega no agente e a resposta do agente v
 test('download-batch e update-process repassam o payload intacto até o agente', async () => {
   await withRelay(async ({ baseUrl, wsBase }) => {
     const agent = await connectAgent(wsBase, AGENT_SECRET);
-    agent.send(JSON.stringify({ type: 'set-pairing-code', code: '333444', expiresAt: Date.now() + 60000 }));
     await new Promise((resolve) => setTimeout(resolve, 50));
-    const paired = await request(baseUrl, '/api/pair', { method: 'POST', body: { code: '333444' } });
-    const token = paired.data.result.token;
 
     const receivedPayloads = [];
     agent.on('message', (raw) => {
@@ -125,11 +145,11 @@ test('download-batch e update-process repassam o payload intacto até o agente',
       agent.send(JSON.stringify({ type: 'action-result', requestId: message.requestId, ok: true, result: { name: message.name } }));
     });
 
-    const batchResponse = await request(baseUrl, '/api/actions/download-batch', { method: 'POST', token, body: { keys: ['cnj:123', 'nup:456'] } });
+    const batchResponse = await request(baseUrl, '/api/actions/download-batch', { method: 'POST', token: AGENT_SECRET, body: { keys: ['cnj:123', 'nup:456'] } });
     assert.equal(batchResponse.status, 200);
     assert.deepEqual(batchResponse.data.result, { name: 'download-batch' });
 
-    const updateResponse = await request(baseUrl, '/api/actions/update-process', { method: 'POST', token, body: { key: 'cnj:123', status: 'Concluído', observacao: 'ok' } });
+    const updateResponse = await request(baseUrl, '/api/actions/update-process', { method: 'POST', token: AGENT_SECRET, body: { key: 'cnj:123', status: 'Concluído', observacao: 'ok' } });
     assert.equal(updateResponse.status, 200);
 
     assert.deepEqual(receivedPayloads, [

@@ -16,23 +16,22 @@ const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
 };
 
-function hashToken(token) {
-  return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-function timingSafeEqualHex(a, b) {
-  const bufA = Buffer.from(String(a || ''), 'hex');
-  const bufB = Buffer.from(String(b || ''), 'hex');
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
+// A senha do celular É o mesmo "Segredo do agente" que o APISS já usa para se autenticar
+// junto a este relay. Isso evita qualquer estado que precise sobreviver a um reinício do
+// serviço (o plano gratuito do Render derruba o processo após ~15 min sem uso): não há
+// pareamento nem lista de dispositivos para perder — a senha nunca muda sozinha, então o
+// celular sempre consegue entrar de novo, mesmo depois do relay reiniciar.
+function verifySecret(candidate, secret) {
+  const a = Buffer.from(String(candidate || ''), 'utf8');
+  const b = Buffer.from(String(secret || ''), 'utf8');
+  if (!secret || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 class RelayState {
   constructor(options = {}) {
     this.now = options.now || (() => new Date());
     this.agentSocket = null;
-    this.pairingCode = null;
-    this.devices = [];
     this.latestSnapshot = null;
     this.pendingActions = new Map();
   }
@@ -50,29 +49,6 @@ class RelayState {
 
   isAgentConnected() {
     return Boolean(this.agentSocket && this.agentSocket.readyState === this.agentSocket.OPEN);
-  }
-
-  setPairingCode(code, expiresAt) {
-    this.pairingCode = { code: String(code || ''), expiresAt: Number(expiresAt) || 0 };
-  }
-
-  pair(code) {
-    if (!this.pairingCode || this.now().getTime() > this.pairingCode.expiresAt) {
-      throw Object.assign(new Error('Código expirado. Gere um novo código no APISS.'), { status: 401 });
-    }
-    if (String(code || '') !== this.pairingCode.code) {
-      throw Object.assign(new Error('Código incorreto.'), { status: 401 });
-    }
-    this.pairingCode = null;
-    const token = crypto.randomBytes(32).toString('hex');
-    this.devices.push({ tokenHash: hashToken(token), pairedAt: this.now().toISOString() });
-    return token;
-  }
-
-  verifyToken(token) {
-    if (!token) return false;
-    const hash = hashToken(token);
-    return this.devices.some((device) => timingSafeEqualHex(device.tokenHash, hash));
   }
 
   pushState(snapshot) {
@@ -144,20 +120,20 @@ function createRelay(options = {}) {
   const agentSecret = options.agentSecret ?? AGENT_SECRET;
 
   async function handleApi(req, res, pathname) {
-    if (pathname === '/api/pair' && req.method === 'POST') {
+    if (pathname === '/api/login' && req.method === 'POST') {
       try {
         const body = await readBody(req);
-        const token = state.pair(body.code);
-        sendJson(res, 200, { ok: true, result: { token } });
+        if (!verifySecret(body.password, agentSecret)) throw Object.assign(new Error('Senha incorreta.'), { status: 401 });
+        sendJson(res, 200, { ok: true, result: {} });
       } catch (error) {
-        sendJson(res, error?.status || 400, { ok: false, error: { message: error?.message || 'Não foi possível parear.' } });
+        sendJson(res, error?.status || 400, { ok: false, error: { message: error?.message || 'Não foi possível entrar.' } });
       }
       return;
     }
 
     const authHeader = String(req.headers.authorization || '');
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    if (!state.verifyToken(token)) { sendJson(res, 401, { ok: false, error: { message: 'Não autenticado.' } }); return; }
+    if (!verifySecret(token, agentSecret)) { sendJson(res, 401, { ok: false, error: { message: 'Não autenticado.' } }); return; }
 
     if (pathname === '/api/state' && req.method === 'GET') {
       sendJson(res, 200, { ok: true, result: { ...(state.latestSnapshot || {}), connected: state.isAgentConnected() } });
@@ -198,8 +174,7 @@ function createRelay(options = {}) {
     socket.on('message', (raw) => {
       let message;
       try { message = JSON.parse(raw.toString('utf8')); } catch (_e) { return; }
-      if (message.type === 'set-pairing-code') state.setPairingCode(message.code, message.expiresAt);
-      else if (message.type === 'push-state') state.pushState(message.snapshot || {});
+      if (message.type === 'push-state') state.pushState(message.snapshot || {});
       else if (message.type === 'action-result') state.resolveAction(message.requestId, message.ok, message.result, message.error);
     });
     socket.on('close', () => state.clearAgent(socket));
@@ -217,4 +192,4 @@ if (require.main === module) {
   server.listen(PORT, () => console.log(`apiss-remote-relay ouvindo na porta ${PORT}`));
 }
 
-module.exports = { createRelay, RelayState, hashToken, timingSafeEqualHex };
+module.exports = { createRelay, RelayState, verifySecret };

@@ -1,6 +1,9 @@
 (function () {
   'use strict';
 
+  // O "token" salvo aqui é o próprio Segredo do agente digitado no login — não é gerado nem
+  // expira, então continua funcionando mesmo depois do relay reiniciar (plano gratuito do
+  // Render derruba o processo após ~15 min sem uso).
   var TOKEN_KEY = 'apiss-remote-token';
   var pollTimer = null;
   var latestProcesses = [];
@@ -156,13 +159,15 @@
   }
 
   el('btnPair').addEventListener('click', function () {
-    var code = el('pairCode').value.trim();
-    if (!/^\d{6}$/.test(code)) { el('pairStatus').textContent = 'Digite os 6 números do código.'; return; }
+    var password = el('pairCode').value;
+    if (!password) { el('pairStatus').textContent = 'Cole o Segredo do agente.'; return; }
     el('btnPair').disabled = true;
-    el('pairStatus').textContent = 'Pareando…';
-    api('/api/pair', { method: 'POST', body: { code: code, label: navigator.userAgent.slice(0, 40) } }).then(function (response) {
-      if (response.data && response.data.ok) { setToken(response.data.result.token); showDashboard(); return; }
-      el('pairStatus').textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível parear.';
+    el('pairStatus').textContent = 'Entrando…';
+    fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password }) }).then(function (response) {
+      return response.json().then(function (data) { return { status: response.status, data: data }; });
+    }).then(function (response) {
+      if (response.data && response.data.ok) { setToken(password); showDashboard(); return; }
+      el('pairStatus').textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível entrar.';
     }).catch(function () {
       el('pairStatus').textContent = 'Falha de conexão com o APISS.';
     }).finally(function () {
