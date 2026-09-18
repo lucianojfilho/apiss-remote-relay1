@@ -10,6 +10,9 @@
   var selectedKeys = {};
   var searchText = '';
   var editingOpen = false; // pausa a atualização da lista enquanto o usuário edita um cartão
+  var latestPrompts = [];
+  var promptSearchText = '';
+  var openPromptKey = ''; // mantém o prompt aberto (com o texto visível) entre atualizações
 
   function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (_e) { return ''; } }
   function setToken(value) { try { localStorage.setItem(TOKEN_KEY, value); } catch (_e) { /* localStorage indisponível */ } }
@@ -125,6 +128,49 @@
     updateDownloadButton();
   }
 
+  function filteredPrompts() {
+    var query = promptSearchText.trim().toLowerCase();
+    if (!query) return latestPrompts;
+    return latestPrompts.filter(function (p) { return (p.titulo || '').toLowerCase().indexOf(query) > -1; });
+  }
+
+  function renderPromptList() {
+    var container = el('promptList');
+    var template = el('promptCardTemplate');
+    var rows = filteredPrompts();
+    container.innerHTML = '';
+    if (!rows.length) { container.innerHTML = '<p class="empty">Nenhum prompt encontrado.</p>'; return; }
+    rows.forEach(function (p) {
+      var node = template.content.cloneNode(true);
+      var body = node.querySelector('.prompt-body');
+      var isOpen = openPromptKey === p.chave;
+      body.hidden = !isOpen;
+      node.querySelector('.prompt-titulo').textContent = p.titulo || 'Prompt sem título';
+      var sourceLabel = p.sourceCount ? (p.sourceCount + ' arquivo(s)') : 'sem fontes';
+      node.querySelector('.prompt-sources').textContent = sourceLabel;
+      var textarea = node.querySelector('.prompt-texto');
+      textarea.value = p.texto || '';
+      node.querySelector('.prompt-open').addEventListener('click', function () {
+        openPromptKey = isOpen ? '' : p.chave;
+        renderPromptList();
+      });
+      container.appendChild(node);
+    });
+    // O botão de copiar precisa do nó já inserido no documento (para achar o irmão de status).
+    container.querySelectorAll('.prompt-card').forEach(function (card) {
+      var copyButton = card.querySelector('.prompt-copy');
+      var statusSpan = card.querySelector('.prompt-copy-status');
+      var textarea = card.querySelector('.prompt-texto');
+      copyButton.addEventListener('click', function () {
+        var text = textarea.value;
+        var done = function () { statusSpan.textContent = 'Copiado.'; setTimeout(function () { statusSpan.textContent = ''; }, 2000); };
+        var fail = function () { statusSpan.textContent = 'Não foi possível copiar — selecione e copie manualmente.'; };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(fail);
+        else { try { textarea.focus(); textarea.select(); document.execCommand('copy'); done(); } catch (_e) { fail(); } }
+      });
+    });
+  }
+
   function refreshState() {
     api('/api/state').then(function (response) {
       if (response.status === 401) { clearToken(); showPairView(); return; }
@@ -140,6 +186,8 @@
       renderLog(result.log);
       latestProcesses = Array.isArray(result.processes) ? result.processes : [];
       if (!editingOpen) renderProcessList();
+      latestPrompts = Array.isArray(result.prompts) ? result.prompts : [];
+      renderPromptList();
       var reconnectCard = el('superReconnectCard');
       if (reconnectCard) reconnectCard.hidden = !result.connected || result.superAuthenticated !== false;
     }).catch(function () { el('connectionState').textContent = 'Não foi possível falar com o servidor.'; });
@@ -204,6 +252,11 @@
   el('processSearch').addEventListener('input', function (event) {
     searchText = event.target.value;
     renderProcessList();
+  });
+
+  el('promptSearch').addEventListener('input', function (event) {
+    promptSearchText = event.target.value;
+    renderPromptList();
   });
 
   el('selectAllVisible').addEventListener('change', function (event) {

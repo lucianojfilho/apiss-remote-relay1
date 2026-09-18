@@ -52,6 +52,12 @@
       <div id="processList"></div>
     </div>
 
+    <div class="card">
+      <h2>Prompts</h2>
+      <input id="promptSearch" type="search" placeholder="Buscar por título…"/>
+      <div id="promptList"></div>
+    </div>
+
     <details class="log">
       <summary>Últimas ações</summary>
       <ul id="logList"></ul>
@@ -78,6 +84,18 @@
       <label>Observação <textarea class="process-observacao" rows="3"></textarea></label>
       <button type="button" class="secondary process-save">Salvar</button>
       <p class="process-edit-status status"></p>
+    </div>
+  </article>
+</template>
+<template id="promptCardTemplate">
+  <article class="prompt-card">
+    <button type="button" class="prompt-open"><span class="prompt-titulo"></span><span class="prompt-sources"></span></button>
+    <div class="prompt-body" hidden>
+      <textarea class="prompt-texto" rows="6" readonly></textarea>
+      <div class="prompt-actions">
+        <button type="button" class="secondary prompt-copy">Copiar prompt</button>
+        <span class="prompt-copy-status status"></span>
+      </div>
     </div>
   </article>
 </template>
