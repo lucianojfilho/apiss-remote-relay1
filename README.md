@@ -48,6 +48,23 @@ senha. Não existe pareamento por código nem expiração — é a mesma senha
 sempre, guardada no navegador do celular, então normalmente você só faz isso
 uma vez por aparelho/navegador.
 
+## SUPER Sapiens direto (sem depender do APISS/PC)
+
+Além do controle remoto do APISS, o relay tem um cliente próprio do SUPER
+Sapiens (login, sincronizar tarefas, baixar PDF), que funciona mesmo com o
+computador desligado. A sessão fica só em memória deste processo — some se
+o Render reiniciar o serviço, exigindo login de novo pelo celular; nenhuma
+senha ou código de 2FA é armazenado permanentemente.
+
+Ao baixar um PDF por esse caminho, o botão **"Enviar ao Drive"** abre o
+seletor de pastas do Google (usando a própria conta do usuário no
+navegador — o relay nunca vê nem guarda esse acesso) e envia o PDF e o
+`.md` convertido (sem OCR — só o texto já embutido no PDF) para a pasta
+escolhida. Isso já vem configurado neste repositório com um projeto do
+Google Cloud próprio; não precisa configurar nada a mais no Render para
+isso funcionar (o Client ID OAuth e a chave de API do Drive são valores
+públicos, feitos para rodar no navegador).
+
 ## Aviso sobre o plano gratuito
 
 O plano gratuito do Render "dorme" o serviço depois de ~15 minutos sem uso e

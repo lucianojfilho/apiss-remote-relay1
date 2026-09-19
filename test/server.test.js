@@ -247,6 +247,39 @@ test('rotas do Sapiens também exigem a senha do relay', async () => {
   }, { sapiensApi: fakeSapiensApi() });
 });
 
+test('/api/sapiens/convert-md grava o PDF recebido num arquivo temporário, converte sem OCR e apaga o temporário', async () => {
+  const seenCalls = [];
+  const fakePdfToMarkdown = async (filePath, options) => {
+    seenCalls.push({ filePath, options });
+    const bytes = await require('node:fs/promises').readFile(filePath);
+    return { markdown: '# Convertido\n\n' + bytes.toString('utf8'), warnings: [], pages: 1 };
+  };
+  await withRelay(async ({ baseUrl }) => {
+    const base64 = Buffer.from('%PDF-1.4 conteúdo de teste').toString('base64');
+    const response = await request(baseUrl, '/api/sapiens/convert-md', {
+      method: 'POST', token: AGENT_SECRET, body: { base64, filename: 'processo-345.pdf' },
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.data.result.markdown, /^# Convertido/);
+    assert.equal(response.data.result.filename, 'processo-345.md');
+    assert.equal(seenCalls.length, 1);
+    assert.equal(seenCalls[0].options.enableOcr, false, 'a rota nunca deve pedir OCR');
+
+    const fs = require('node:fs/promises');
+    await assert.rejects(() => fs.access(seenCalls[0].filePath), 'o PDF temporário deve ser apagado após a conversão');
+  }, { sapiensApi: fakeSapiensApi(), pdfToMarkdown: fakePdfToMarkdown });
+});
+
+test('/api/sapiens/convert-md recusa corpo sem PDF e propaga erro de conversão', async () => {
+  await withRelay(async ({ baseUrl }) => {
+    const missing = await request(baseUrl, '/api/sapiens/convert-md', { method: 'POST', token: AGENT_SECRET, body: {} });
+    assert.equal(missing.status, 400);
+  }, {
+    sapiensApi: fakeSapiensApi(),
+    pdfToMarkdown: async () => { throw new Error('PDF corrompido.'); },
+  });
+});
+
 test('token inválido é recusado em rotas protegidas', async () => {
   await withRelay(async ({ baseUrl }) => {
     const response = await request(baseUrl, '/api/state', { token: 'lixo' });

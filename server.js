@@ -2,10 +2,12 @@
 
 const http = require('node:http');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { WebSocketServer } = require('ws');
 const { SuperApi } = require('./super-api');
+const { pdfToMarkdown } = require('./pdf-markdown');
 
 const PORT = process.env.PORT || 3000;
 const AGENT_SECRET = process.env.AGENT_SECRET || '';
@@ -100,13 +102,13 @@ function sendJson(res, status, body) {
   res.end(payload);
 }
 
-async function readBody(req) {
+async function readBody(req, maxBytes = 16 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (chunk) => {
       size += chunk.length;
-      if (size > 16 * 1024) { reject(Object.assign(new Error('Corpo muito grande.'), { status: 413 })); req.destroy(); return; }
+      if (size > maxBytes) { reject(Object.assign(new Error('Corpo muito grande.'), { status: 413 })); req.destroy(); return; }
       chunks.push(chunk);
     });
     req.on('end', () => {
@@ -138,6 +140,8 @@ function createRelay(options = {}) {
   // computador desligado. A sessão (token) fica só em memória deste processo: some se o
   // relay reiniciar (plano gratuito do Render), exigindo login de novo pelo celular.
   const sapiensApi = options.sapiensApi || new SuperApi(globalThis.fetch);
+  // Injetável nos testes para não depender de um PDF real nem do pdfjs-dist.
+  const convertPdfToMarkdown = options.pdfToMarkdown || pdfToMarkdown;
 
   async function handleApi(req, res, pathname) {
     if (pathname === '/api/login' && req.method === 'POST') {
@@ -205,6 +209,28 @@ function createRelay(options = {}) {
         sendJson(res, 200, { ok: true, result: { filename: `processo-${processId}.pdf`, mimeType: 'application/pdf', base64: pdf.toString('base64') } });
       } catch (error) {
         sendJson(res, error?.status || 502, { ok: false, error: { message: error?.message || 'Não foi possível baixar o PDF.' } });
+      }
+      return;
+    }
+    if (pathname === '/api/sapiens/convert-md' && req.method === 'POST') {
+      // Sem OCR: só extrai o texto já presente no PDF (rápido e leve). PDFs digitalizados sem
+      // camada de texto saem com pouco ou nenhum conteúdo — nesse caso o PDF original enviado
+      // ao Drive continua sendo a fonte completa.
+      let tempPath = '';
+      try {
+        const body = await readBody(req, 25 * 1024 * 1024);
+        const base64 = String(body?.base64 || '');
+        if (!base64) throw Object.assign(new Error('PDF ausente.'), { status: 400 });
+        const buffer = Buffer.from(base64, 'base64');
+        tempPath = path.join(os.tmpdir(), `apiss-relay-${crypto.randomUUID()}.pdf`);
+        await fs.writeFile(tempPath, buffer);
+        const result = await convertPdfToMarkdown(tempPath, { enableOcr: false });
+        const filename = String(body?.filename || 'processo.pdf').replace(/\.pdf$/i, '') + '.md';
+        sendJson(res, 200, { ok: true, result: { markdown: result.markdown, warnings: result.warnings, filename } });
+      } catch (error) {
+        sendJson(res, error?.status || 502, { ok: false, error: { message: error?.message || 'Não foi possível converter para .md.' } });
+      } finally {
+        if (tempPath) await fs.unlink(tempPath).catch(() => {});
       }
       return;
     }

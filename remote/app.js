@@ -236,9 +236,16 @@
     gapi.load('picker', function () { pickerLibLoaded = true; onReady(); });
   }
 
-  function uploadToDrive(base64, mimeType, filename, folderId, statusEl) {
+  function utf8ToBase64(text) {
+    var bytes = new TextEncoder().encode(text);
+    var binary = '';
+    bytes.forEach(function (byte) { binary += String.fromCharCode(byte); });
+    return btoa(binary);
+  }
+
+  function uploadToDrive(base64, mimeType, filename, folderId, onDone) {
     var metadata = { name: filename, parents: [folderId] };
-    var boundary = 'apiss-' + Date.now();
+    var boundary = 'apiss-' + Date.now() + '-' + Math.random().toString(16).slice(2);
     var body = '--' + boundary + '\r\n'
       + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) + '\r\n'
       + '--' + boundary + '\r\n'
@@ -249,12 +256,17 @@
       method: 'POST',
       headers: { Authorization: 'Bearer ' + driveAccessToken, 'Content-Type': 'multipart/related; boundary=' + boundary },
       body: body,
-    }).then(function (response) {
-      statusEl.textContent = response.ok ? 'Enviado ao Drive.' : 'O Drive recusou o envio — tente novamente.';
-    }).catch(function () { statusEl.textContent = 'Falha de conexão ao enviar para o Drive.'; });
+    }).then(function (response) { onDone(response.ok); }).catch(function () { onDone(false); });
   }
 
-  function openDrivePickerAndSend(base64, mimeType, filename, statusEl) {
+  function convertPdfToMd(base64, filename, onDone) {
+    api('/api/sapiens/convert-md', { method: 'POST', body: { base64: base64, filename: filename } }).then(function (response) {
+      if (response.data && response.data.ok) onDone(response.data.result, null);
+      else onDone(null, (response.data && response.data.error && response.data.error.message) || 'Não foi possível converter para .md.');
+    }).catch(function () { onDone(null, 'Falha de conexão ao converter para .md.'); });
+  }
+
+  function openDrivePickerAndSend(pdfResult, statusEl) {
     statusEl.textContent = 'Conectando à sua conta Google…';
     ensureDriveAccessToken(function () {
       ensurePickerLoaded(function () {
@@ -269,8 +281,20 @@
           .setTitle('Escolha a pasta de destino no Drive')
           .setCallback(function (data) {
             if (data.action === google.picker.Action.PICKED) {
-              statusEl.textContent = 'Enviando para o Drive…';
-              uploadToDrive(base64, mimeType, filename, data.docs[0].id, statusEl);
+              var folderId = data.docs[0].id;
+              statusEl.textContent = 'Enviando o PDF para o Drive…';
+              uploadToDrive(pdfResult.base64, pdfResult.mimeType, pdfResult.filename, folderId, function (pdfOk) {
+                if (!pdfOk) { statusEl.textContent = 'O Drive recusou o PDF — tente novamente.'; return; }
+                statusEl.textContent = 'PDF enviado. Convertendo para .md…';
+                convertPdfToMd(pdfResult.base64, pdfResult.filename, function (mdResult, error) {
+                  if (!mdResult) { statusEl.textContent = 'PDF enviado ao Drive, mas a conversão para .md falhou: ' + error; return; }
+                  statusEl.textContent = 'Enviando o .md para o Drive…';
+                  var mdBase64 = utf8ToBase64(mdResult.markdown);
+                  uploadToDrive(mdBase64, 'text/markdown', mdResult.filename, folderId, function (mdOk) {
+                    statusEl.textContent = mdOk ? 'PDF e .md enviados ao Drive.' : 'PDF enviado, mas o .md falhou ao enviar ao Drive.';
+                  });
+                });
+              });
             } else if (data.action === google.picker.Action.CANCEL) {
               statusEl.textContent = 'Envio cancelado.';
             }
@@ -330,7 +354,7 @@
       });
       driveButton.addEventListener('click', function () {
         fetchPdf(function (result) {
-          openDrivePickerAndSend(result.base64, result.mimeType, result.filename, statusEl);
+          openDrivePickerAndSend(result, statusEl);
         });
       });
       container.appendChild(node);
