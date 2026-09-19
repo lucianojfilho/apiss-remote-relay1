@@ -32,8 +32,8 @@ button.linklike{background:none;border:none;color:var(--muted);font-weight:400;t
 .hint{background:#f1efe6;border-radius:8px;padding:9px 11px;font-size:12px!important;line-height:1.5}
 .process-group-title{margin:16px 0 8px;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
 .process-group-title:first-of-type{margin-top:4px}
-#processListToday,#processListRest{display:grid;gap:8px}
-#processListToday .empty,#processListRest .empty{color:var(--muted);font-size:13px;text-align:center;padding:12px 0}
+#processListToday,#processListRest,#sapiensProcessList{display:grid;gap:8px;margin-top:10px}
+#processListToday .empty,#processListRest .empty,#sapiensProcessList .empty{color:var(--muted);font-size:13px;text-align:center;padding:12px 0}
 .process-card{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:#fff}
 .process-head{display:flex;align-items:flex-start;gap:10px}
 .process-open{flex:1;text-align:left;background:none;border:0;padding:0;margin:0;width:auto;font-weight:400;cursor:pointer;color:inherit;display:flex;flex-direction:column;gap:2px}

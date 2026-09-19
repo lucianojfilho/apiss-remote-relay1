@@ -13,6 +13,7 @@
   var latestPrompts = [];
   var promptSearchText = '';
   var openPromptKey = ''; // mantém o prompt aberto (com o texto visível) entre atualizações
+  var sapiensProcesses = []; // vem do /api/sapiens/sync — lista independente do APISS do PC
 
   function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (_e) { return ''; } }
   function setToken(value) { try { localStorage.setItem(TOKEN_KEY, value); } catch (_e) { /* localStorage indisponível */ } }
@@ -30,6 +31,7 @@
     el('pairView').hidden = true;
     el('dashboardView').hidden = false;
     refreshState();
+    refreshSapiensStatus();
     if (!pollTimer) pollTimer = setInterval(refreshState, 15000);
   }
 
@@ -185,6 +187,131 @@
       });
     });
   }
+
+  function downloadBlobFile(base64, mimeType, filename) {
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    var blob = new Blob([bytes], { type: mimeType });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+  }
+
+  function renderSapiensSession(status) {
+    var loginBox = el('sapiensLoginBox'), sessionBox = el('sapiensSessionBox');
+    var authenticated = !!(status && status.authenticated);
+    loginBox.hidden = authenticated;
+    sessionBox.hidden = !authenticated;
+    el('sapiensTotpBox').hidden = !(status && status.awaitingTotp);
+    if (authenticated) {
+      var profile = status.profile || {};
+      el('sapiensConnectedAs').textContent = 'Conectado' + (profile.name || profile.username ? ' como ' + (profile.name || profile.username) : '') + '.';
+    }
+  }
+
+  function refreshSapiensStatus() {
+    api('/api/sapiens/status').then(function (response) {
+      if (response.status === 401) { clearToken(); showPairView(); return; }
+      if (response.data && response.data.ok) renderSapiensSession(response.data.result);
+    }).catch(function () { /* mantém o último estado conhecido na tela */ });
+  }
+
+  function renderSapiensProcessList() {
+    var container = el('sapiensProcessList');
+    var template = el('sapiensProcessCardTemplate');
+    container.innerHTML = '';
+    if (!sapiensProcesses.length) { container.innerHTML = '<p class="empty">Nenhum processo sincronizado ainda.</p>'; return; }
+    sapiensProcesses.forEach(function (p) {
+      var node = template.content.cloneNode(true);
+      node.querySelector('.process-numero').textContent = p.numero || 'Processo sem número';
+      node.querySelector('.process-assunto').textContent = p.assunto || '';
+      var button = node.querySelector('.sapiens-download');
+      var statusEl = node.querySelector('.sapiens-download-status');
+      button.addEventListener('click', function () {
+        if (!p.superProcessoId) { statusEl.textContent = 'Este processo não tem identificador do SUPER.'; return; }
+        button.disabled = true;
+        statusEl.textContent = 'Baixando…';
+        api('/api/sapiens/download', { method: 'POST', body: { superProcessoId: p.superProcessoId } }).then(function (response) {
+          if (response.status === 401) { clearToken(); showPairView(); return; }
+          if (response.data && response.data.ok) {
+            var result = response.data.result;
+            downloadBlobFile(result.base64, result.mimeType, result.filename);
+            statusEl.textContent = 'PDF baixado — mova para o Drive pelo seu celular.';
+          } else {
+            statusEl.textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível baixar.';
+          }
+        }).catch(function () { statusEl.textContent = 'Falha de conexão.'; }).finally(function () { button.disabled = false; });
+      });
+      container.appendChild(node);
+    });
+  }
+
+  el('btnSapiensLogin').addEventListener('click', function () {
+    var username = el('sapiensUsername').value.trim(), password = el('sapiensPassword').value;
+    var status = el('sapiensLoginStatus');
+    if (!username || !password) { status.textContent = 'Informe usuário e senha.'; return; }
+    el('btnSapiensLogin').disabled = true;
+    status.textContent = 'Entrando…';
+    api('/api/sapiens/login', { method: 'POST', body: { username: username, password: password } }).then(function (response) {
+      if (response.status === 401) { clearToken(); showPairView(); return; }
+      if (response.data && response.data.ok) {
+        renderSapiensSession(response.data.result);
+        status.textContent = response.data.result.status === 'totp_required' ? 'Digite o código do Authenticator.' : 'Conectado.';
+      } else {
+        status.textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível entrar.';
+      }
+    }).catch(function () { status.textContent = 'Falha de conexão.'; }).finally(function () { el('btnSapiensLogin').disabled = false; });
+  });
+
+  el('btnSapiensVerifyTotp').addEventListener('click', function () {
+    var code = el('sapiensTotpCode').value.replace(/\D/g, '');
+    var status = el('sapiensLoginStatus');
+    if (!/^\d{6}$/.test(code)) { status.textContent = 'Digite os 6 números do Authenticator.'; return; }
+    el('btnSapiensVerifyTotp').disabled = true;
+    status.textContent = 'Confirmando…';
+    api('/api/sapiens/verify-totp', { method: 'POST', body: { code: code } }).then(function (response) {
+      if (response.status === 401) { clearToken(); showPairView(); return; }
+      if (response.data && response.data.ok) {
+        renderSapiensSession(response.data.result);
+        status.textContent = response.data.result.authenticated ? 'Conectado.' : 'Código incorreto.';
+        el('sapiensTotpCode').value = '';
+      } else {
+        status.textContent = (response.data && response.data.error && response.data.error.message) || 'Código inválido.';
+      }
+    }).catch(function () { status.textContent = 'Falha de conexão.'; }).finally(function () { el('btnSapiensVerifyTotp').disabled = false; });
+  });
+
+  el('btnSapiensSync').addEventListener('click', function () {
+    var status = el('sapiensSyncStatus');
+    el('btnSapiensSync').disabled = true;
+    status.textContent = 'Sincronizando…';
+    api('/api/sapiens/sync', { method: 'POST', body: {} }).then(function (response) {
+      if (response.status === 401) { clearToken(); showPairView(); return; }
+      if (response.data && response.data.ok) {
+        sapiensProcesses = response.data.result.tasks || [];
+        renderSapiensProcessList();
+        status.textContent = sapiensProcesses.length + ' processo(s) encontrado(s).';
+      } else {
+        status.textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível sincronizar.';
+      }
+    }).catch(function () { status.textContent = 'Falha de conexão.'; }).finally(function () { el('btnSapiensSync').disabled = false; });
+  });
+
+  el('btnSapiensLogout').addEventListener('click', function () {
+    api('/api/sapiens/logout', { method: 'POST' }).then(function () {
+      sapiensProcesses = [];
+      renderSapiensSession({ authenticated: false });
+      el('sapiensUsername').value = '';
+      el('sapiensPassword').value = '';
+      el('sapiensLoginStatus').textContent = '';
+    });
+  });
 
   function refreshState() {
     api('/api/state').then(function (response) {

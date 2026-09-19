@@ -8,12 +8,12 @@ const { createRelay } = require('../server');
 
 const AGENT_SECRET = 'segredo-de-teste';
 
-async function withRelay(fn) {
-  const { server, state, wss } = createRelay({ agentSecret: AGENT_SECRET, now: () => new Date('2026-09-14T12:00:00.000Z') });
+async function withRelay(fn, extraOptions) {
+  const { server, state, wss, sapiensApi } = createRelay({ agentSecret: AGENT_SECRET, now: () => new Date('2026-09-14T12:00:00.000Z'), ...extraOptions });
   await new Promise((resolve) => server.listen(0, resolve));
   const port = server.address().port;
   try {
-    await fn({ baseUrl: `http://127.0.0.1:${port}`, wsBase: `ws://127.0.0.1:${port}`, state });
+    await fn({ baseUrl: `http://127.0.0.1:${port}`, wsBase: `ws://127.0.0.1:${port}`, state, sapiensApi });
   } finally {
     // Conexões upgradadas para WebSocket não são fechadas por server.closeAllConnections() —
     // isso só alcança conexões HTTP simples. É preciso terminar os clientes do WebSocketServer
@@ -46,6 +46,18 @@ function connectAgent(wsBase, secret) {
     ws.on('open', () => resolve(ws));
     ws.on('error', reject);
   });
+}
+
+function fakeSapiensApi(overrides) {
+  const validPdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 conteúdo de teste').toString('base64');
+  return Object.assign({
+    status: () => ({ authenticated: false, awaitingTotp: false, profile: null }),
+    login: async () => ({ status: 'authenticated', authenticated: true, awaitingTotp: false, profile: { name: 'Fulano de Tal' } }),
+    verifyTotp: async () => ({ status: 'authenticated', authenticated: true, awaitingTotp: false, profile: { name: 'Fulano de Tal' } }),
+    logout: () => ({ authenticated: false, awaitingTotp: false, profile: null }),
+    syncTasks: async () => ({ tasks: [{ numero: '1111084-03.2023.4.01.3400', superProcessoId: '345' }], total: 1 }),
+    downloadProcessPdf: async () => ({ conteudo: validPdf }),
+  }, overrides);
 }
 
 test('recusa a conexão do agente com segredo errado', async () => {
@@ -177,6 +189,62 @@ test('/api/actions/reconnect-super repassa o payload (código do Authenticator) 
     assert.deepEqual(response.data.result, { authenticated: true, payloadSeen: { totpCode: '123456' } });
     agent.close();
   });
+});
+
+test('/api/sapiens/* funciona sem nenhum agente conectado (Sapiens independe do APISS do PC)', async () => {
+  const sapiensApi = fakeSapiensApi();
+  await withRelay(async ({ baseUrl, state }) => {
+    assert.equal(state.isAgentConnected(), false);
+
+    const login = await request(baseUrl, '/api/sapiens/login', { method: 'POST', token: AGENT_SECRET, body: { username: '12345678900', password: 'senha' } });
+    assert.equal(login.status, 200);
+    assert.equal(login.data.result.authenticated, true);
+
+    const sync = await request(baseUrl, '/api/sapiens/sync', { method: 'POST', token: AGENT_SECRET, body: {} });
+    assert.equal(sync.status, 200);
+    assert.equal(sync.data.result.total, 1);
+
+    const download = await request(baseUrl, '/api/sapiens/download', { method: 'POST', token: AGENT_SECRET, body: { superProcessoId: '345' } });
+    assert.equal(download.status, 200);
+    assert.equal(download.data.result.mimeType, 'application/pdf');
+    const decoded = Buffer.from(download.data.result.base64, 'base64').toString('utf8');
+    assert.match(decoded, /^%PDF-1\.4/);
+  }, { sapiensApi });
+});
+
+test('/api/sapiens/login com TOTP pendente e /api/sapiens/verify-totp completa a autenticação', async () => {
+  const sapiensApi = fakeSapiensApi({
+    login: async () => ({ status: 'totp_required', authenticated: false, awaitingTotp: true }),
+  });
+  await withRelay(async ({ baseUrl }) => {
+    const login = await request(baseUrl, '/api/sapiens/login', { method: 'POST', token: AGENT_SECRET, body: { username: 'x', password: 'y' } });
+    assert.equal(login.data.result.status, 'totp_required');
+
+    const verify = await request(baseUrl, '/api/sapiens/verify-totp', { method: 'POST', token: AGENT_SECRET, body: { code: '123456' } });
+    assert.equal(verify.status, 200);
+    assert.equal(verify.data.result.authenticated, true);
+  }, { sapiensApi });
+});
+
+test('/api/sapiens/download recusa sem identificador do processo e propaga erro do SUPER', async () => {
+  const sapiensApi = fakeSapiensApi({
+    downloadProcessPdf: async () => { throw Object.assign(new Error('Credenciais, código ou sessão recusados pelo SUPER.'), { status: 401 }); },
+  });
+  await withRelay(async ({ baseUrl }) => {
+    const missing = await request(baseUrl, '/api/sapiens/download', { method: 'POST', token: AGENT_SECRET, body: {} });
+    assert.equal(missing.status, 400);
+
+    const failed = await request(baseUrl, '/api/sapiens/download', { method: 'POST', token: AGENT_SECRET, body: { superProcessoId: '345' } });
+    assert.equal(failed.status, 401);
+    assert.match(failed.data.error.message, /SUPER/);
+  }, { sapiensApi });
+});
+
+test('rotas do Sapiens também exigem a senha do relay', async () => {
+  await withRelay(async ({ baseUrl }) => {
+    const response = await request(baseUrl, '/api/sapiens/status');
+    assert.equal(response.status, 401);
+  }, { sapiensApi: fakeSapiensApi() });
 });
 
 test('token inválido é recusado em rotas protegidas', async () => {

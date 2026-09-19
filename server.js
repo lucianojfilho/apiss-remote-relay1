@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { WebSocketServer } = require('ws');
+const { SuperApi } = require('./super-api');
 
 const PORT = process.env.PORT || 3000;
 const AGENT_SECRET = process.env.AGENT_SECRET || '';
@@ -78,6 +79,21 @@ class RelayState {
   }
 }
 
+// Mesma decodificação usada pelo APISS (download-manager.js): o SUPER devolve o PDF como
+// base64 dentro de "conteudo", às vezes já com o prefixo data URL, às vezes só o base64 puro.
+function decodePdfContent(component) {
+  const content = String(component?.conteudo || '');
+  const marker = ';base64,';
+  const markerAt = content.indexOf(marker);
+  const encoded = markerAt >= 0 ? content.slice(markerAt + marker.length) : content;
+  if (!encoded) throw Object.assign(new Error('O SUPER retornou um PDF vazio.'), { status: 502 });
+  const buffer = Buffer.from(encoded, 'base64');
+  if (buffer.length < 5 || buffer.subarray(0, 5).toString('ascii') !== '%PDF-') {
+    throw Object.assign(new Error('O arquivo retornado pelo SUPER não é um PDF válido.'), { status: 502 });
+  }
+  return buffer;
+}
+
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(payload) });
@@ -118,6 +134,10 @@ async function serveStatic(res, pathname) {
 function createRelay(options = {}) {
   const state = new RelayState(options);
   const agentSecret = options.agentSecret ?? AGENT_SECRET;
+  // Cliente do SUPER Sapiens rodando direto no relay — funciona mesmo com o APISS do
+  // computador desligado. A sessão (token) fica só em memória deste processo: some se o
+  // relay reiniciar (plano gratuito do Render), exigindo login de novo pelo celular.
+  const sapiensApi = options.sapiensApi || new SuperApi(globalThis.fetch);
 
   async function handleApi(req, res, pathname) {
     if (pathname === '/api/login' && req.method === 'POST') {
@@ -137,6 +157,55 @@ function createRelay(options = {}) {
 
     if (pathname === '/api/state' && req.method === 'GET') {
       sendJson(res, 200, { ok: true, result: { ...(state.latestSnapshot || {}), connected: state.isAgentConnected() } });
+      return;
+    }
+
+    if (pathname === '/api/sapiens/status' && req.method === 'GET') {
+      sendJson(res, 200, { ok: true, result: sapiensApi.status() });
+      return;
+    }
+    if (pathname === '/api/sapiens/login' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        sendJson(res, 200, { ok: true, result: await sapiensApi.login(body) });
+      } catch (error) {
+        sendJson(res, error?.status || 400, { ok: false, error: { message: error?.message || 'Não foi possível entrar no SUPER.' } });
+      }
+      return;
+    }
+    if (pathname === '/api/sapiens/verify-totp' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        sendJson(res, 200, { ok: true, result: await sapiensApi.verifyTotp(body) });
+      } catch (error) {
+        sendJson(res, error?.status || 400, { ok: false, error: { message: error?.message || 'Código inválido.' } });
+      }
+      return;
+    }
+    if (pathname === '/api/sapiens/logout' && req.method === 'POST') {
+      sendJson(res, 200, { ok: true, result: sapiensApi.logout() });
+      return;
+    }
+    if (pathname === '/api/sapiens/sync' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        sendJson(res, 200, { ok: true, result: await sapiensApi.syncTasks(body || {}) });
+      } catch (error) {
+        sendJson(res, error?.status || 502, { ok: false, error: { message: error?.message || 'Não foi possível sincronizar com o SUPER.' } });
+      }
+      return;
+    }
+    if (pathname === '/api/sapiens/download' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const processId = String(body?.superProcessoId || '').replace(/\D/g, '');
+        if (!processId) throw Object.assign(new Error('Processo sem identificador do SUPER.'), { status: 400 });
+        const component = await sapiensApi.downloadProcessPdf(processId);
+        const pdf = decodePdfContent(component);
+        sendJson(res, 200, { ok: true, result: { filename: `processo-${processId}.pdf`, mimeType: 'application/pdf', base64: pdf.toString('base64') } });
+      } catch (error) {
+        sendJson(res, error?.status || 502, { ok: false, error: { message: error?.message || 'Não foi possível baixar o PDF.' } });
+      }
       return;
     }
 
@@ -181,7 +250,7 @@ function createRelay(options = {}) {
     socket.on('close', () => state.clearAgent(socket));
   });
 
-  return { server, state, wss };
+  return { server, state, wss, sapiensApi };
 }
 
 if (require.main === module) {

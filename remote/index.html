@@ -41,6 +41,32 @@
       <p id="superReconnectStatus" class="status" role="status"></p>
     </div>
 
+    <div class="card" id="sapiensDirectCard">
+      <h2>SUPER Sapiens direto</h2>
+      <p>Funciona mesmo com o computador desligado — este login fica só nesta sessão do relay, não no APISS.</p>
+
+      <div id="sapiensLoginBox">
+        <input id="sapiensUsername" type="text" placeholder="CPF ou usuário de rede" autocomplete="username"/>
+        <input id="sapiensPassword" type="password" placeholder="Senha" autocomplete="current-password"/>
+        <button id="btnSapiensLogin" class="primary">Entrar no SUPER</button>
+        <div id="sapiensTotpBox" hidden>
+          <input id="sapiensTotpCode" inputmode="numeric" maxlength="6" placeholder="Código do Authenticator"/>
+          <button id="btnSapiensVerifyTotp" class="primary">Confirmar código</button>
+        </div>
+        <p id="sapiensLoginStatus" class="status" role="status"></p>
+      </div>
+
+      <div id="sapiensSessionBox" hidden>
+        <p class="connection-state online" id="sapiensConnectedAs"></p>
+        <div class="actions">
+          <button id="btnSapiensSync" class="secondary">Sincronizar agora</button>
+        </div>
+        <p id="sapiensSyncStatus" class="status" role="status"></p>
+        <div id="sapiensProcessList"></div>
+        <button id="btnSapiensLogout" class="linklike">Sair do SUPER (neste relay)</button>
+      </div>
+    </div>
+
     <div class="card">
       <h2>Prompts</h2>
       <input id="promptSearch" type="search" placeholder="Buscar por título…"/>
@@ -89,6 +115,17 @@
       <button type="button" class="secondary process-save">Salvar</button>
       <p class="process-edit-status status"></p>
     </div>
+  </article>
+</template>
+<template id="sapiensProcessCardTemplate">
+  <article class="process-card">
+    <div class="process-head">
+      <button type="button" class="process-open" style="flex:1"><span class="process-numero"></span><span class="process-assunto"></span></button>
+    </div>
+    <div class="actions" style="margin-top:8px;margin-bottom:0">
+      <button type="button" class="secondary sapiens-download">Baixar PDF</button>
+    </div>
+    <p class="sapiens-download-status status"></p>
   </article>
 </template>
 <template id="promptCardTemplate">
