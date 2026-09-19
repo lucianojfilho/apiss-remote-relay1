@@ -22,6 +22,12 @@
 
   <section id="dashboardView" hidden>
     <div class="card">
+      <h2>Prompts</h2>
+      <input id="promptSearch" type="search" placeholder="Buscar por título…"/>
+      <div id="promptList"></div>
+    </div>
+
+    <div class="card">
       <p class="connection-state" id="connectionState">Verificando conexão com o APISS…</p>
       <div class="counters">
         <div class="counter"><span id="cntDia">–</span><label>Processos do dia</label></div>
@@ -67,12 +73,6 @@
         <div id="sapiensProcessList"></div>
         <button id="btnSapiensLogout" class="linklike">Sair do SUPER (neste relay)</button>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>Prompts</h2>
-      <input id="promptSearch" type="search" placeholder="Buscar por título…"/>
-      <div id="promptList"></div>
     </div>
 
     <div class="card">
