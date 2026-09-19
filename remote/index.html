@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
 <title>APISS · Controle remoto</title>
 <link rel="stylesheet" href="style.css"/>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 </head>
 <body>
 <main class="app">
@@ -122,8 +124,9 @@
     <div class="process-head">
       <button type="button" class="process-open" style="flex:1"><span class="process-numero"></span><span class="process-assunto"></span></button>
     </div>
-    <div class="actions" style="margin-top:8px;margin-bottom:0">
-      <button type="button" class="secondary sapiens-download">Baixar PDF</button>
+    <div class="actions" style="margin-top:8px;margin-bottom:0;display:flex;gap:8px">
+      <button type="button" class="primary sapiens-send-drive" style="margin:0">Enviar ao Drive</button>
+      <button type="button" class="secondary sapiens-download" style="margin:0">Baixar no celular</button>
     </div>
     <p class="sapiens-download-status status"></p>
   </article>

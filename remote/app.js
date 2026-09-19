@@ -15,6 +15,17 @@
   var openPromptKey = ''; // mantém o prompt aberto (com o texto visível) entre atualizações
   var sapiensProcesses = []; // vem do /api/sapiens/sync — lista independente do APISS do PC
 
+  // Envio ao Drive: tudo roda no navegador do celular, com a própria conta Google do usuário —
+  // o relay nunca vê nem guarda o token de acesso ao Drive. O Client ID e a chave abaixo são
+  // públicos por natureza (é assim que o OAuth via navegador funciona); a permissão real fica
+  // restrita ao escopo drive.file (só os arquivos que o próprio app cria) e ao domínio deste site.
+  var GOOGLE_CLIENT_ID = '485699516086-nopkhncqrisa32bcm66hj0vo5rugn1h2.apps.googleusercontent.com';
+  var GOOGLE_API_KEY = 'AIzaSyA-fUU2MGXeJ4n7PZ014oo9l1UuoOfo8P8';
+  var DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  var driveAccessToken = '';
+  var pickerLibLoaded = false;
+  var driveTokenClient = null;
+
   function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (_e) { return ''; } }
   function setToken(value) { try { localStorage.setItem(TOKEN_KEY, value); } catch (_e) { /* localStorage indisponível */ } }
   function clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch (_e) { /* localStorage indisponível */ } }
@@ -203,6 +214,73 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
   }
 
+  function ensureDriveAccessToken(onReady, onError) {
+    if (driveAccessToken) { onReady(); return; }
+    if (!window.google || !google.accounts || !google.accounts.oauth2) { onError('O login do Google ainda está carregando — tente de novo em alguns segundos.'); return; }
+    if (!driveTokenClient) {
+      driveTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: DRIVE_SCOPE,
+        callback: function (response) {
+          if (response && response.access_token) { driveAccessToken = response.access_token; onReady(); }
+          else onError('Não foi possível autorizar o acesso ao Drive.');
+        },
+      });
+    }
+    driveTokenClient.requestAccessToken();
+  }
+
+  function ensurePickerLoaded(onReady) {
+    if (pickerLibLoaded) { onReady(); return; }
+    if (!window.gapi) { setTimeout(function () { ensurePickerLoaded(onReady); }, 300); return; }
+    gapi.load('picker', function () { pickerLibLoaded = true; onReady(); });
+  }
+
+  function uploadToDrive(base64, mimeType, filename, folderId, statusEl) {
+    var metadata = { name: filename, parents: [folderId] };
+    var boundary = 'apiss-' + Date.now();
+    var body = '--' + boundary + '\r\n'
+      + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) + '\r\n'
+      + '--' + boundary + '\r\n'
+      + 'Content-Type: ' + mimeType + '\r\n'
+      + 'Content-Transfer-Encoding: base64\r\n\r\n' + base64 + '\r\n'
+      + '--' + boundary + '--';
+    fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + driveAccessToken, 'Content-Type': 'multipart/related; boundary=' + boundary },
+      body: body,
+    }).then(function (response) {
+      statusEl.textContent = response.ok ? 'Enviado ao Drive.' : 'O Drive recusou o envio — tente novamente.';
+    }).catch(function () { statusEl.textContent = 'Falha de conexão ao enviar para o Drive.'; });
+  }
+
+  function openDrivePickerAndSend(base64, mimeType, filename, statusEl) {
+    statusEl.textContent = 'Conectando à sua conta Google…';
+    ensureDriveAccessToken(function () {
+      ensurePickerLoaded(function () {
+        statusEl.textContent = 'Escolha a pasta no seletor do Drive…';
+        var view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+          .setSelectFolderEnabled(true)
+          .setIncludeFolders(true);
+        var picker = new google.picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(driveAccessToken)
+          .setDeveloperKey(GOOGLE_API_KEY)
+          .setTitle('Escolha a pasta de destino no Drive')
+          .setCallback(function (data) {
+            if (data.action === google.picker.Action.PICKED) {
+              statusEl.textContent = 'Enviando para o Drive…';
+              uploadToDrive(base64, mimeType, filename, data.docs[0].id, statusEl);
+            } else if (data.action === google.picker.Action.CANCEL) {
+              statusEl.textContent = 'Envio cancelado.';
+            }
+          })
+          .build();
+        picker.setVisible(true);
+      });
+    }, function (message) { statusEl.textContent = message; });
+  }
+
   function renderSapiensSession(status) {
     var loginBox = el('sapiensLoginBox'), sessionBox = el('sapiensSessionBox');
     var authenticated = !!(status && status.authenticated);
@@ -231,22 +309,29 @@
       var node = template.content.cloneNode(true);
       node.querySelector('.process-numero').textContent = p.numero || 'Processo sem número';
       node.querySelector('.process-assunto').textContent = p.assunto || '';
-      var button = node.querySelector('.sapiens-download');
+      var downloadButton = node.querySelector('.sapiens-download');
+      var driveButton = node.querySelector('.sapiens-send-drive');
       var statusEl = node.querySelector('.sapiens-download-status');
-      button.addEventListener('click', function () {
+      function fetchPdf(onGot) {
         if (!p.superProcessoId) { statusEl.textContent = 'Este processo não tem identificador do SUPER.'; return; }
-        button.disabled = true;
-        statusEl.textContent = 'Baixando…';
+        downloadButton.disabled = true; driveButton.disabled = true;
+        statusEl.textContent = 'Baixando do SUPER…';
         api('/api/sapiens/download', { method: 'POST', body: { superProcessoId: p.superProcessoId } }).then(function (response) {
           if (response.status === 401) { clearToken(); showPairView(); return; }
-          if (response.data && response.data.ok) {
-            var result = response.data.result;
-            downloadBlobFile(result.base64, result.mimeType, result.filename);
-            statusEl.textContent = 'PDF baixado — mova para o Drive pelo seu celular.';
-          } else {
-            statusEl.textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível baixar.';
-          }
-        }).catch(function () { statusEl.textContent = 'Falha de conexão.'; }).finally(function () { button.disabled = false; });
+          if (response.data && response.data.ok) onGot(response.data.result);
+          else statusEl.textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível baixar.';
+        }).catch(function () { statusEl.textContent = 'Falha de conexão.'; }).finally(function () { downloadButton.disabled = false; driveButton.disabled = false; });
+      }
+      downloadButton.addEventListener('click', function () {
+        fetchPdf(function (result) {
+          downloadBlobFile(result.base64, result.mimeType, result.filename);
+          statusEl.textContent = 'PDF baixado no celular.';
+        });
+      });
+      driveButton.addEventListener('click', function () {
+        fetchPdf(function (result) {
+          openDrivePickerAndSend(result.base64, result.mimeType, result.filename, statusEl);
+        });
       });
       container.appendChild(node);
     });
