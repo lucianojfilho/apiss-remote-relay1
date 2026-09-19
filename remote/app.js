@@ -86,45 +86,60 @@
     button.textContent = count ? 'Baixar selecionados (' + count + ')' : 'Baixar selecionados';
   }
 
-  function renderProcessList() {
-    var container = el('processList');
+  function buildProcessCard(p) {
     var template = el('processCardTemplate');
-    var rows = filteredProcesses();
-    container.innerHTML = '';
-    if (!rows.length) { container.innerHTML = '<p class="empty">Nenhum processo encontrado.</p>'; updateDownloadButton(); return; }
-    rows.forEach(function (p) {
-      var node = template.content.cloneNode(true);
-      var checkbox = node.querySelector('.process-select');
-      checkbox.checked = !!selectedKeys[p.key];
-      checkbox.addEventListener('change', function () { selectedKeys[p.key] = checkbox.checked; updateDownloadButton(); });
-      node.querySelector('.process-numero').textContent = p.numero || 'Processo sem número';
-      node.querySelector('.process-assunto').textContent = p.assunto || '';
-      var deadline = node.querySelector('.process-deadline');
-      deadline.textContent = formatDeadline(p.daysUntil);
-      deadline.className = 'process-deadline' + (p.daysUntil != null && p.daysUntil <= 0 ? ' urgent' : p.daysUntil != null && p.daysUntil <= 5 ? ' soon' : '');
-      var editBox = node.querySelector('.process-edit');
-      var statusSelect = node.querySelector('.process-status');
-      var observacaoField = node.querySelector('.process-observacao');
-      statusSelect.value = p.status || 'Ativo';
-      observacaoField.value = p.observacao || '';
-      node.querySelector('.process-open').addEventListener('click', function () {
-        var willOpen = editBox.hidden;
-        editBox.hidden = !willOpen;
-        editingOpen = willOpen;
-      });
-      node.querySelector('.process-save').addEventListener('click', function (event) {
-        var button = event.currentTarget, statusBox = editBox.querySelector('.process-edit-status');
-        button.disabled = true;
-        statusBox.textContent = 'Salvando…';
-        api('/api/actions/update-process', { method: 'POST', body: { key: p.key, status: statusSelect.value, observacao: observacaoField.value } }).then(function (response) {
-          if (response.status === 401) { clearToken(); showPairView(); return; }
-          statusBox.textContent = (response.data && response.data.ok) ? 'Salvo.' : ((response.data && response.data.error && response.data.error.message) || 'Não foi possível salvar.');
-          editingOpen = false;
-          refreshState();
-        }).catch(function () { statusBox.textContent = 'Falha de conexão.'; }).finally(function () { button.disabled = false; });
-      });
-      container.appendChild(node);
+    var node = template.content.cloneNode(true);
+    var checkbox = node.querySelector('.process-select');
+    checkbox.checked = !!selectedKeys[p.key];
+    if (p.trf1Eligible) {
+      checkbox.checked = false;
+      delete selectedKeys[p.key];
+      checkbox.disabled = true;
+      node.querySelector('.process-trf1-note').hidden = false;
+    }
+    checkbox.addEventListener('change', function () { selectedKeys[p.key] = checkbox.checked; updateDownloadButton(); });
+    node.querySelector('.process-numero').textContent = p.numero || 'Processo sem número';
+    node.querySelector('.process-assunto').textContent = p.assunto || '';
+    var deadline = node.querySelector('.process-deadline');
+    deadline.textContent = formatDeadline(p.daysUntil);
+    deadline.className = 'process-deadline' + (p.daysUntil != null && p.daysUntil <= 0 ? ' urgent' : p.daysUntil != null && p.daysUntil <= 5 ? ' soon' : '');
+    var editBox = node.querySelector('.process-edit');
+    var statusSelect = node.querySelector('.process-status');
+    var observacaoField = node.querySelector('.process-observacao');
+    statusSelect.value = p.status || 'Ativo';
+    observacaoField.value = p.observacao || '';
+    node.querySelector('.process-open').addEventListener('click', function () {
+      var willOpen = editBox.hidden;
+      editBox.hidden = !willOpen;
+      editingOpen = willOpen;
     });
+    node.querySelector('.process-save').addEventListener('click', function (event) {
+      var button = event.currentTarget, statusBox = editBox.querySelector('.process-edit-status');
+      button.disabled = true;
+      statusBox.textContent = 'Salvando…';
+      api('/api/actions/update-process', { method: 'POST', body: { key: p.key, status: statusSelect.value, observacao: observacaoField.value } }).then(function (response) {
+        if (response.status === 401) { clearToken(); showPairView(); return; }
+        statusBox.textContent = (response.data && response.data.ok) ? 'Salvo.' : ((response.data && response.data.error && response.data.error.message) || 'Não foi possível salvar.');
+        editingOpen = false;
+        refreshState();
+      }).catch(function () { statusBox.textContent = 'Falha de conexão.'; }).finally(function () { button.disabled = false; });
+    });
+    return node;
+  }
+
+  function renderProcessGroup(containerId, rows) {
+    var container = el(containerId);
+    container.innerHTML = '';
+    if (!rows.length) { container.innerHTML = '<p class="empty">Nenhum processo aqui.</p>'; return; }
+    rows.forEach(function (p) { container.appendChild(buildProcessCard(p)); });
+  }
+
+  function renderProcessList() {
+    var rows = filteredProcesses();
+    var today = rows.filter(function (p) { return p.isToday; });
+    var rest = rows.filter(function (p) { return !p.isToday; });
+    renderProcessGroup('processListToday', today);
+    renderProcessGroup('processListRest', rest);
     updateDownloadButton();
   }
 
@@ -260,7 +275,7 @@
   });
 
   el('selectAllVisible').addEventListener('change', function (event) {
-    filteredProcesses().forEach(function (p) { selectedKeys[p.key] = event.target.checked; });
+    filteredProcesses().forEach(function (p) { if (!p.trf1Eligible) selectedKeys[p.key] = event.target.checked; });
     renderProcessList();
   });
 
@@ -274,7 +289,7 @@
       if (response.status === 401) { clearToken(); showPairView(); return; }
       if (response.data && response.data.ok) {
         var result = response.data.result || {};
-        el('batchStatus').textContent = 'Sapiens: ' + (result.sapiensCount || 0) + ' baixado(s). TRF1: ' + (result.trf1Started || 0) + ' iniciado(s) (a conversão continua em segundo plano no APISS).';
+        el('batchStatus').textContent = (result.sapiensCount || 0) + ' processo(s) do Sapiens baixado(s) e convertido(s) em .md.' + (result.trf1Skipped ? ' ' + result.trf1Skipped + ' processo(s) do TRF1 ignorado(s) — baixe pelo computador.' : '');
         selectedKeys = {};
       } else {
         el('batchStatus').textContent = (response.data && response.data.error && response.data.error.message) || 'Não foi possível iniciar o download.';

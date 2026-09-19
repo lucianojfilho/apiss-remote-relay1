@@ -42,20 +42,24 @@
     </div>
 
     <div class="card">
+      <h2>Prompts</h2>
+      <input id="promptSearch" type="search" placeholder="Buscar por título…"/>
+      <div id="promptList"></div>
+    </div>
+
+    <div class="card">
       <h2>Processos</h2>
+      <p class="hint">Download em lote baixa e converte para .md só os processos do Sapiens — os do TRF1 continuam só pelo computador.</p>
       <input id="processSearch" type="search" placeholder="Buscar por número ou assunto…"/>
       <label class="select-all-row"><input type="checkbox" id="selectAllVisible"/> Marcar todos os filtrados</label>
       <div class="actions">
         <button id="btnDownloadBatch" class="primary" disabled>Baixar selecionados</button>
       </div>
       <p id="batchStatus" class="status" role="status"></p>
-      <div id="processList"></div>
-    </div>
-
-    <div class="card">
-      <h2>Prompts</h2>
-      <input id="promptSearch" type="search" placeholder="Buscar por título…"/>
-      <div id="promptList"></div>
+      <h3 class="process-group-title">Processos do dia</h3>
+      <div id="processListToday"></div>
+      <h3 class="process-group-title">Demais processos</h3>
+      <div id="processListRest"></div>
     </div>
 
     <details class="log">
@@ -70,7 +74,7 @@
   <article class="process-card">
     <div class="process-head">
       <input type="checkbox" class="process-select"/>
-      <button type="button" class="process-open"><span class="process-numero"></span><span class="process-assunto"></span></button>
+      <button type="button" class="process-open"><span class="process-numero"></span><span class="process-assunto"></span><span class="process-trf1-note" hidden>Baixar no PC (TRF1)</span></button>
       <span class="process-deadline"></span>
     </div>
     <div class="process-edit" hidden>
