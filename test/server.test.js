@@ -3,10 +3,42 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const crypto = require('node:crypto');
 const WebSocket = require('ws');
 const { createRelay } = require('../server');
+const { verifyLicense } = require('../license');
 
 const AGENT_SECRET = 'segredo-de-teste';
+const ADMIN_SECRET = 'senha-admin-teste';
+
+function makeLicenseKeyPair() {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+  return {
+    privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }),
+  };
+}
+
+// Fake do GoogleSheetsClient: guarda linhas em memória com a mesma forma
+// [Nome, Email, MachineId, DataCadastro, Status] e entende os mesmos formatos
+// de range que o LicenseStore de fato usa (A:E para acrescentar, A2:E para
+// ler, E<linha> para atualizar só a coluna Status de uma linha).
+function fakeSheetsClient(seedRows) {
+  const rows = (seedRows || []).map((row) => row.slice());
+  return {
+    rows,
+    appendRow: async (_range, values) => { rows.push(values.slice()); },
+    getRows: async (_range) => rows.map((row) => row.slice()),
+    updateRow: async (range, values) => {
+      const fullRow = /!A(\d+):E\d+$/.exec(range);
+      if (fullRow) { const index = Number(fullRow[1]) - 2; rows[index] = values.slice(); return; }
+      const statusOnly = /!E(\d+)$/.exec(range);
+      if (!statusOnly) throw new Error('range de updateRow não suportado no fake: ' + range);
+      const index = Number(statusOnly[1]) - 2;
+      if (rows[index]) rows[index][4] = values[0];
+    },
+  };
+}
 
 async function withRelay(fn, extraOptions) {
   const { server, state, wss, sapiensApi } = createRelay({ agentSecret: AGENT_SECRET, now: () => new Date('2026-09-14T12:00:00.000Z'), ...extraOptions });
@@ -301,4 +333,118 @@ test('uma nova conexão do agente substitui a anterior (reconexão do APISS)', a
     assert.equal(state.isAgentConnected(), true);
     second.close();
   });
+});
+
+test('POST /api/license/register cadastra na planilha e devolve uma licença assinada e verificável', async () => {
+  const { privateKeyPem, publicKeyPem } = makeLicenseKeyPair();
+  const sheetsClient = fakeSheetsClient();
+  await withRelay(async ({ baseUrl }) => {
+    const response = await request(baseUrl, '/api/license/register', {
+      method: 'POST',
+      body: { nome: 'Fulano de Tal', email: 'Fulano@AGU.gov.br', machineId: 'maquina-123' },
+    });
+    assert.equal(response.status, 200);
+    assert.ok(response.data.result.license);
+    const payload = verifyLicense(publicKeyPem, response.data.result.license);
+    assert.equal(payload.email, 'fulano@agu.gov.br');
+    assert.equal(payload.machineId, 'maquina-123');
+    assert.equal(sheetsClient.rows.length, 1);
+    assert.deepEqual(sheetsClient.rows[0].slice(0, 3), ['Fulano de Tal', 'fulano@agu.gov.br', 'maquina-123']);
+    assert.equal(sheetsClient.rows[0][4], 'ativo');
+  }, { sheetsClient, licensePrivateKey: privateKeyPem, adminSecret: ADMIN_SECRET });
+});
+
+test('POST /api/license/register reativa a linha existente (mesmo e-mail+computador) em vez de duplicar', async () => {
+  const { privateKeyPem } = makeLicenseKeyPair();
+  const sheetsClient = fakeSheetsClient([
+    ['Fulano de Tal', 'fulano@agu.gov.br', 'maquina-123', '2026-09-01T00:00:00.000Z', 'revogado'],
+  ]);
+  await withRelay(async ({ baseUrl }) => {
+    const response = await request(baseUrl, '/api/license/register', {
+      method: 'POST',
+      body: { nome: 'Fulano de Tal', email: 'fulano@agu.gov.br', machineId: 'maquina-123' },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(sheetsClient.rows.length, 1, 'não deveria criar uma segunda linha para o mesmo e-mail+computador');
+    assert.equal(sheetsClient.rows[0][4], 'ativo');
+  }, { sheetsClient, licensePrivateKey: privateKeyPem, adminSecret: ADMIN_SECRET });
+});
+
+test('POST /api/license/register recusa cadastro sem nome, e-mail inválido ou sem machineId', async () => {
+  const { privateKeyPem } = makeLicenseKeyPair();
+  const sheetsClient = fakeSheetsClient();
+  await withRelay(async ({ baseUrl }) => {
+    const semNome = await request(baseUrl, '/api/license/register', { method: 'POST', body: { nome: '', email: 'a@b.com', machineId: 'm1' } });
+    assert.equal(semNome.status, 400);
+    const emailInvalido = await request(baseUrl, '/api/license/register', { method: 'POST', body: { nome: 'Fulano', email: 'não-é-email', machineId: 'm1' } });
+    assert.equal(emailInvalido.status, 400);
+    const semMaquina = await request(baseUrl, '/api/license/register', { method: 'POST', body: { nome: 'Fulano', email: 'a@b.com', machineId: '' } });
+    assert.equal(semMaquina.status, 400);
+    assert.equal(sheetsClient.rows.length, 0);
+  }, { sheetsClient, licensePrivateKey: privateKeyPem, adminSecret: ADMIN_SECRET });
+});
+
+test('POST /api/license/register responde 503 quando o licenciamento não está configurado no relay', async () => {
+  await withRelay(async ({ baseUrl }) => {
+    const response = await request(baseUrl, '/api/license/register', { method: 'POST', body: { nome: 'Fulano', email: 'a@b.com', machineId: 'm1' } });
+    assert.equal(response.status, 503);
+  });
+});
+
+test('POST /api/license/check devolve o status atual para o par email+machineId, e "nao_encontrado" quando não bate', async () => {
+  const sheetsClient = fakeSheetsClient([
+    ['Fulano de Tal', 'fulano@agu.gov.br', 'maquina-123', '2026-09-22T00:00:00.000Z', 'ativo'],
+    ['Ciclana', 'ciclana@agu.gov.br', 'maquina-456', '2026-09-22T00:00:00.000Z', 'revogado'],
+  ]);
+  await withRelay(async ({ baseUrl }) => {
+    const ativo = await request(baseUrl, '/api/license/check', { method: 'POST', body: { email: 'fulano@agu.gov.br', machineId: 'maquina-123' } });
+    assert.equal(ativo.data.result.status, 'ativo');
+    const revogado = await request(baseUrl, '/api/license/check', { method: 'POST', body: { email: 'ciclana@agu.gov.br', machineId: 'maquina-456' } });
+    assert.equal(revogado.data.result.status, 'revogado');
+    const machineErrada = await request(baseUrl, '/api/license/check', { method: 'POST', body: { email: 'fulano@agu.gov.br', machineId: 'outra-maquina' } });
+    assert.equal(machineErrada.data.result.status, 'nao_encontrado');
+  }, { sheetsClient, adminSecret: ADMIN_SECRET });
+});
+
+test('rotas /admin/api/* exigem a senha de administrador (login e Bearer nas demais)', async () => {
+  const sheetsClient = fakeSheetsClient([['Fulano', 'fulano@agu.gov.br', 'm1', '2026-09-22T00:00:00.000Z', 'ativo']]);
+  await withRelay(async ({ baseUrl }) => {
+    const loginErrado = await request(baseUrl, '/admin/api/login', { method: 'POST', body: { password: 'errada' } });
+    assert.equal(loginErrado.status, 401);
+    const loginCerto = await request(baseUrl, '/admin/api/login', { method: 'POST', body: { password: ADMIN_SECRET } });
+    assert.equal(loginCerto.status, 200);
+    const semToken = await request(baseUrl, '/admin/api/list');
+    assert.equal(semToken.status, 401);
+    const comToken = await request(baseUrl, '/admin/api/list', { token: ADMIN_SECRET });
+    assert.equal(comToken.status, 200);
+    assert.equal(comToken.data.result.rows.length, 1);
+    assert.equal(comToken.data.result.rows[0].email, 'fulano@agu.gov.br');
+  }, { sheetsClient, adminSecret: ADMIN_SECRET });
+});
+
+test('POST /admin/api/revoke e /admin/api/reactivate mudam o status de todas as linhas daquele e-mail', async () => {
+  const sheetsClient = fakeSheetsClient([
+    ['Fulano', 'fulano@agu.gov.br', 'm1', '2026-09-22T00:00:00.000Z', 'ativo'],
+    ['Fulano', 'fulano@agu.gov.br', 'm2-reinstalou', '2026-09-23T00:00:00.000Z', 'ativo'],
+  ]);
+  await withRelay(async ({ baseUrl }) => {
+    const revoke = await request(baseUrl, '/admin/api/revoke', { method: 'POST', body: { email: 'Fulano@AGU.gov.br' }, token: ADMIN_SECRET });
+    assert.equal(revoke.status, 200);
+    assert.equal(revoke.data.result.updated, 2);
+    assert.equal(sheetsClient.rows[0][4], 'revogado');
+    assert.equal(sheetsClient.rows[1][4], 'revogado');
+
+    const reactivate = await request(baseUrl, '/admin/api/reactivate', { method: 'POST', body: { email: 'fulano@agu.gov.br' }, token: ADMIN_SECRET });
+    assert.equal(reactivate.status, 200);
+    assert.equal(sheetsClient.rows[0][4], 'ativo');
+    assert.equal(sheetsClient.rows[1][4], 'ativo');
+  }, { sheetsClient, adminSecret: ADMIN_SECRET });
+});
+
+test('POST /admin/api/revoke devolve 404 para um e-mail sem nenhum cadastro', async () => {
+  const sheetsClient = fakeSheetsClient([]);
+  await withRelay(async ({ baseUrl }) => {
+    const response = await request(baseUrl, '/admin/api/revoke', { method: 'POST', body: { email: 'ninguem@agu.gov.br' }, token: ADMIN_SECRET });
+    assert.equal(response.status, 404);
+  }, { sheetsClient, adminSecret: ADMIN_SECRET });
 });

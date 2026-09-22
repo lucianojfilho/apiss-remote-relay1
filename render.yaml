@@ -8,3 +8,13 @@ services:
     envVars:
       - key: AGENT_SECRET
         sync: false
+      - key: ADMIN_SECRET
+        sync: false
+      - key: LICENSE_PRIVATE_KEY
+        sync: false
+      - key: LICENSE_SHEET_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_EMAIL
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+        sync: false

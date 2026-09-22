@@ -65,6 +65,54 @@ Google Cloud próprio; não precisa configurar nada a mais no Render para
 isso funcionar (o Client ID OAuth e a chave de API do Drive são valores
 públicos, feitos para rodar no navegador).
 
+## Licenciamento do APISS (ativação por computador + página de administração)
+
+O APISS pede, na primeira vez que abre num computador, um cadastro com nome
+completo e e-mail funcional. Esse cadastro vira uma linha numa planilha do
+Google Sheets (o relay não tem banco de dados próprio — ver aviso do plano
+gratuito abaixo) e gera uma licença assinada digitalmente, amarrada àquele
+computador especificamente. A administradora consegue ver quem está
+cadastrado e revogar o acesso de qualquer pessoa a qualquer momento numa
+página própria, protegida por senha.
+
+### Configuração (uma vez só)
+
+1. **Planilha do Google**: crie uma planilha com o cabeçalho
+   `Nome | Email | MachineId | DataCadastro | Status` na primeira linha da
+   aba "Página1". Copie o ID da planilha (o trecho da URL entre
+   `/d/` e `/edit`) — é o valor de `LICENSE_SHEET_ID`.
+2. **Conta de serviço do Google** (para o relay ler/escrever na planilha sem
+   depender do login de ninguém): no Google Cloud Console do mesmo projeto
+   já usado pelo APISS, ative a **Google Sheets API**, crie uma **conta de
+   serviço**, gere uma **chave JSON** para ela, e **compartilhe a planilha**
+   com o e-mail dessa conta de serviço (permissão de Editor). Do JSON
+   baixado, `client_email` vira `GOOGLE_SERVICE_ACCOUNT_EMAIL` e
+   `private_key` vira `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` (em base64 —
+   veja abaixo).
+3. **Par de chaves da licença** (assinatura das licenças — não confundir com
+   a conta de serviço do Google): gere localmente com
+   ```
+   node -e "const c=require('crypto');const{privateKey,publicKey}=c.generateKeyPairSync('ed25519');console.log('PRIVATE='+Buffer.from(privateKey.export({type:'pkcs8',format:'pem'})).toString('base64'));console.log('PUBLIC='+Buffer.from(publicKey.export({type:'spki',format:'pem'})).toString('base64'));"
+   ```
+   O `PRIVATE` vira `LICENSE_PRIVATE_KEY` (só no Render, nunca no APISS). O
+   `PUBLIC` é embutido no código-fonte do APISS (`license-manager.js`) para
+   validar a licença offline.
+4. Defina `ADMIN_SECRET` com uma senha só sua, para acessar
+   `https://SEU-RELAY.onrender.com/admin.html`.
+5. No Render, preencha as 4 variáveis (`GOOGLE_SERVICE_ACCOUNT_EMAIL`,
+   `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` em base64 da chave privada RSA da
+   conta de serviço, `LICENSE_SHEET_ID`, `LICENSE_PRIVATE_KEY`) e
+   `ADMIN_SECRET`. Sem elas, o relay continua funcionando normalmente para
+   tudo o mais — só a ativação/administração de licenças fica indisponível.
+
+### Usando a página de administração
+
+Acesse `/admin.html` no domínio do relay, entre com o `ADMIN_SECRET` e veja
+a lista de quem já ativou o APISS (nome, e-mail, data, status). O botão
+**Revogar** marca aquele cadastro como inativo — na próxima vez que aquele
+computador verificar a licença (precisa de internet nesse momento), o APISS
+bloqueia o uso com um aviso claro para a pessoa. **Reativar** desfaz.
+
 ## Aviso sobre o plano gratuito
 
 O plano gratuito do Render "dorme" o serviço depois de ~15 minutos sem uso e

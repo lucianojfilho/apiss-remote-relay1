@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>APISS · Administração de licenças</title>
+<link rel="stylesheet" href="style.css"/>
+<style>
+  .app{max-width:900px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border)}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.02em}
+  td.status-ativo{color:#2f5c3d;font-weight:700}
+  td.status-revogado{color:#a12727;font-weight:700}
+  td.actions-cell{white-space:nowrap}
+  td.actions-cell button{width:auto;padding:6px 10px;margin:0;font-size:12px}
+  .table-wrap{overflow-x:auto}
+  #adminEmpty{color:var(--muted);text-align:center;padding:20px 0}
+</style>
+</head>
+<body>
+<main class="app">
+  <header><h1>APISS</h1><p class="subtitle">Administração de licenças</p></header>
+
+  <section id="loginView" class="card">
+    <h2>Entrar</h2>
+    <input id="adminPassword" type="password" placeholder="Senha de administrador" autocomplete="off"/>
+    <button id="btnAdminLogin" class="primary">Entrar</button>
+    <p id="loginStatus" class="status" role="status"></p>
+  </section>
+
+  <section id="listView" hidden>
+    <div class="card">
+      <h2>Pessoas cadastradas</h2>
+      <p>Cada linha é um computador ativado. Revogar impede que aquele computador continue usando o APISS na próxima verificação (não é imediato — depende do computador estar com internet).</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Nome</th><th>E-mail</th><th>Cadastro</th><th>Status</th><th>Ação</th></tr></thead>
+          <tbody id="rowsBody"></tbody>
+        </table>
+      </div>
+      <p id="adminEmpty" hidden>Nenhum cadastro ainda.</p>
+      <p id="listStatus" class="status" role="status"></p>
+      <button id="btnRefresh" class="secondary">Atualizar lista</button>
+    </div>
+    <button id="btnAdminLogout" class="linklike">Sair</button>
+  </section>
+</main>
+<script src="admin.js"></script>
+</body>
+</html>
